@@ -1,0 +1,329 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Advanced Code Translator</title>
+    <style>
+        :root {
+            --teal: #26A69A;
+            --dark-slate: #263238;
+            --amber: #FFCA28;
+            --text-light: #ECEFF1;
+            --panel-bg: #37474F;
+            --shadow: 0 10px 40px rgba(0, 0, 0, 0.4);
+        }
+
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+            font-family: 'Roboto', sans-serif;
+        }
+
+        body {
+            background: var(--dark-slate);
+            color: var(--text-light);
+            min-height: 100vh;
+            display: flex;
+            flex-direction: column;
+            padding: 40px;
+        }
+
+        .container {
+            max-width: 1600px;
+            margin: 0 auto;
+            flex: 1;
+            display: grid;
+            grid-template-rows: auto 1fr auto;
+            gap: 40px;
+        }
+
+        header {
+            text-align: center;
+            padding: 30px;
+            background: linear-gradient(135deg, var(--teal), var(--amber));
+            border-radius: 25px;
+            box-shadow: var(--shadow);
+            transition: transform 0.3s ease, box-shadow 0.3s ease;
+        }
+
+        header:hover {
+            transform: translateY(-5px);
+            box-shadow: 0 15px 50px rgba(38, 166, 154, 0.5);
+        }
+
+        header h1 {
+            font-size: 3rem;
+            text-transform: uppercase;
+            letter-spacing: 4px;
+            text-shadow: 3px 3px 6px rgba(0, 0, 0, 0.3);
+        }
+
+        .main-content {
+            display: grid;
+            grid-template-columns: 1fr 400px 1fr;
+            gap: 40px;
+            height: calc(100vh - 240px);
+        }
+
+        .code-panel {
+            background: var(--panel-bg);
+            border-radius: 25px;
+            padding: 30px;
+            box-shadow: var(--shadow);
+            display: flex;
+            flex-direction: column;
+            position: relative;
+            overflow: hidden;
+            transition: transform 0.3s ease, box-shadow 0.3s ease;
+        }
+
+        .code-panel:hover {
+            transform: translateY(-5px);
+            box-shadow: 0 15px 50px rgba(0, 0, 0, 0.5);
+        }
+
+        .code-panel h2 {
+            margin-bottom: 25px;
+            color: var(--teal);
+            font-size: 1.6rem;
+            letter-spacing: 1.5px;
+            font-weight: 500;
+        }
+
+        textarea {
+            flex: 1;
+            background: rgba(255, 255, 255, 0.05);
+            border: 2px solid var(--teal);
+            border-radius: 15px;
+            padding: 20px;
+            color: var(--text-light);
+            font-family: 'Fira Code', monospace;
+            font-size: 1.2rem;
+            resize: none;
+            transition: border-color 0.3s ease, box-shadow 0.3s ease;
+        }
+
+        textarea:focus {
+            outline: none;
+            border-color: var(--amber);
+            box-shadow: 0 0 20px rgba(255, 202, 40, 0.5);
+        }
+
+        .control-panel {
+            background: var(--panel-bg);
+            border-radius: 25px;
+            padding: 30px;
+            box-shadow: var(--shadow);
+            display: flex;
+            flex-direction: column;
+            gap: 30px;
+            transition: transform 0.3s ease, box-shadow 0.3s ease;
+        }
+
+        .control-panel:hover {
+            transform: translateY(-5px);
+            box-shadow: 0 15px 50px rgba(0, 0, 0, 0.5);
+        }
+
+        select, button {
+            padding: 15px;
+            border: none;
+            border-radius: 12px;
+            background: var(--teal);
+            color: var(--text-light);
+            font-size: 1.2rem;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            box-shadow: 0 5px 20px rgba(38, 166, 154, 0.4);
+        }
+
+        select:hover, button:hover {
+            background: var(--amber);
+            transform: translateY(-3px);
+            box-shadow: 0 8px 25px rgba(255, 202, 40, 0.5);
+            color: var(--dark-slate);
+        }
+
+        .stats {
+            position: absolute;
+            bottom: 20px;
+            right: 20px;
+            font-size: 1rem;
+            color: var(--teal);
+            opacity: 0.85;
+            font-weight: 300;
+        }
+
+        .notification {
+            position: fixed;
+            top: 40px;
+            right: 40px;
+            padding: 20px 35px;
+            border-radius: 12px;
+            background: var(--amber);
+            color: var(--dark-slate);
+            font-weight: 500;
+            transform: translateX(120%);
+            transition: transform 0.3s ease;
+            box-shadow: var(--shadow);
+        }
+
+        .notification.show {
+            transform: translateX(0);
+        }
+
+        @media (max-width: 1024px) {
+            .main-content {
+                grid-template-columns: 1fr;
+                grid-template-rows: auto auto auto;
+                gap: 25px;
+            }
+
+            .control-panel {
+                padding: 25px;
+            }
+
+            header h1 {
+                font-size: 2.2rem;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <header>
+            <h1>Gemini API Code Translator</h1>
+        </header>
+
+        <div class="main-content">
+            <div class="code-panel">
+                <h2>Input Code</h2>
+                <textarea id="inputCode" placeholder="Enter your code here..."></textarea>
+                <div class="stats" id="inputStats">Lines: 0 | Chars: 0</div>
+            </div>
+
+            <div class="control-panel">
+                <select id="sourceLanguage">
+                    <option value="Python3">Python3</option>
+                    <option value="Java">Java</option>
+                    <option value="C">C</option>
+                    <option value="C++">C++</option>
+                </select>
+                <select id="targetLanguage">
+                    <option value="Python3">Python3</option>
+                    <option value="Java">Java</option>
+                    <option value="C">C</option>
+                    <option value="C++">C++</option>
+                </select>
+                <button onclick="translateCode()">Translate</button>
+                <button onclick="clearCode()">Clear</button>
+                <button onclick="copyOutput()">Copy Output</button>
+            </div>
+
+            <div class="code-panel">
+                <h2>Translated Code</h2>
+                <textarea id="outputCode" readonly placeholder="Translated code will appear here..."></textarea>
+                <div class="stats" id="outputStats">Lines: 0 | Chars: 0</div>
+            </div>
+        </div>
+    </div>
+
+    <div id="notification" class="notification"></div>
+
+    <script>
+        const $ = (selector) => document.querySelector(selector);
+
+        function updateStats(textarea, statsElement) {
+            const text = textarea.value;
+            const lines = text.split('\n').length;
+            const chars = text.length;
+            statsElement.textContent = `Lines: ${lines} | Chars: ${chars}`;
+        }
+
+        function showNotification(message) {
+            const notification = $('#notification');
+            notification.textContent = message;
+            notification.classList.add('show');
+            setTimeout(() => notification.classList.remove('show'), 3000);
+        }
+
+        // Replace with your actual Gemini API key
+        const API_KEY = 'AIzaSyDvB1f3VkWo6kaIZDFKtnc25gO7lzHbHKA'; // Insert your Gemini API key
+
+        async function callGeminiAPI(inputCode, sourceLang, targetLang) {
+            if (sourceLang === targetLang) {
+                throw new Error('Source and target languages must be different');
+            }
+
+            const apiEndpoint = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${API_KEY}`;
+            const prompt = `Translate the following ${sourceLang} code to ${targetLang}. Provide only the translated code without additional explanation or commentary:\n\n${inputCode}`;
+
+            try {
+                const response = await fetch(apiEndpoint, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({
+                        contents: [{
+                            parts: [{ text: prompt }]
+                        }]
+                    })
+                });
+
+                if (!response.ok) {
+                    const errorData = await response.json();
+                    throw new Error(`API Error: ${errorData.error.message || response.statusText}`);
+                }
+
+                const data = await response.json();
+                return data.candidates[0].content.parts[0].text.trim();
+            } catch (error) {
+                throw new Error(`Gemini API call failed: ${error.message}`);
+            }
+        }
+
+        async function translateCode() {
+            const input = $('#inputCode').value;
+            if (!input.trim()) {
+                showNotification('Please enter some code to translate');
+                return;
+            }
+
+            const sourceLang = $('#sourceLanguage').value;
+            const targetLang = $('#targetLanguage').value;
+
+            try {
+                showNotification('Translating with Gemini API... Please wait.');
+                const translatedCode = await callGeminiAPI(input, sourceLang, targetLang);
+                $('#outputCode').value = translatedCode;
+                updateStats($('#outputCode'), $('#outputStats'));
+                showNotification('Translation completed successfully!');
+            } catch (error) {
+                showNotification(`Error: ${error.message}`);
+            }
+        }
+
+        function clearCode() {
+            $('#inputCode').value = '';
+            $('#outputCode').value = '';
+            updateStats($('#inputCode'), $('#inputStats'));
+            updateStats($('#outputCode'), $('#outputStats'));
+            showNotification('Code cleared');
+        }
+
+        function copyOutput() {
+            const output = $('#outputCode');
+            output.select();
+            document.execCommand('copy');
+            showNotification('Output copied to clipboard');
+        }
+
+        $('#inputCode').addEventListener('input', () => 
+            updateStats($('#inputCode'), $('#inputStats'))
+        );
+    </script>
+</body>
+</html>
