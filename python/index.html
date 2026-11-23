@@ -138,6 +138,14 @@
   .cm-s-default .cm-atom { color: var(--num); }
   .cm-s-default .cm-error { color: var(--err); background: none; }
 
+  .console-wrap { flex: 1; min-height: 0; position: relative; display: flex; flex-direction: column; }
+  .copy-btn {
+    position: absolute; top: 8px; right: 16px; padding: 3px 10px; font-size: 12px;
+    background: var(--panel); color: var(--muted); box-shadow: 0 1px 3px rgba(0,0,0,.12);
+  }
+  .copy-btn:hover:not(:disabled) { color: var(--text); }
+  .copy-btn.done { color: var(--run); border-color: var(--run); }
+  #console:empty ~ .copy-btn { display: none; }
   #console {
     flex: 1; overflow: auto; margin: 0; padding: 12px 14px; background: var(--console-bg);
     font: 14px/1.5 var(--mono); white-space: pre-wrap; word-break: break-word; cursor: text;
@@ -211,7 +219,10 @@
       <span>Output</span><span class="spacer"></span>
       <button id="clearBtn">Clear</button>
     </div>
-    <pre id="console" aria-live="polite"></pre>
+    <div class="console-wrap">
+      <pre id="console" aria-live="polite"></pre>
+      <button id="copyBtn" class="copy-btn" title="Copy the program's output">Copy</button>
+    </div>
     <div id="stdinBox">
       <div class="pane-head"><span>Input (stdin) — one line per input() call</span></div>
       <textarea id="stdin" spellcheck="false" placeholder="Type program input here before running…"></textarea>
@@ -308,6 +319,43 @@ print("Squares:", squares)
   }
   function clearConsole() { consoleEl.textContent = ""; }
   $("clearBtn").onclick = clearConsole;
+
+  // Copy only what the program printed (and the input typed into it):
+  // skips the "Code executed successfully…" line, package-loading notes and plots.
+  function outputText() {
+    let text = "";
+    for (const node of consoleEl.childNodes) {
+      if (node.nodeType === 3) { text += node.textContent; continue; }
+      if (node.nodeType !== 1 || node.tagName !== "SPAN") continue;
+      if (node.classList.contains("meta") || node.classList.contains("info")) continue;
+      text += node.textContent;
+    }
+    return text.replace(/\s+$/, "");
+  }
+  async function copyText(text) {
+    try { await navigator.clipboard.writeText(text); return true; }
+    catch {
+      const ta = document.createElement("textarea");
+      ta.value = text; ta.style.position = "fixed"; ta.style.opacity = "0";
+      document.body.appendChild(ta); ta.select();
+      let ok = false;
+      try { ok = document.execCommand("copy"); } catch {}
+      ta.remove();
+      return ok;
+    }
+  }
+  let copyTimer;
+  $("copyBtn").onclick = async (e) => {
+    e.stopPropagation(); // don't steal focus into a pending input box
+    const btn = $("copyBtn");
+    const text = outputText();
+    if (!text) { toast("Nothing to copy yet"); return; }
+    const ok = await copyText(text);
+    btn.textContent = ok ? "Copied ✓" : "Copy failed";
+    btn.classList.toggle("done", ok);
+    clearTimeout(copyTimer);
+    copyTimer = setTimeout(() => { btn.textContent = "Copy"; btn.classList.remove("done"); }, 1500);
+  };
   consoleEl.addEventListener("click", () => {
     const inp = consoleEl.querySelector(".inline-input");
     if (inp && !getSelection().toString()) inp.focus();
