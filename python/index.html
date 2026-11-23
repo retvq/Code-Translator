@@ -239,6 +239,7 @@ print(greet(name))
 squares = [n * n for n in range(1, 6)]
 print("Squares:", squares)
 `;
+  const BUILD = "3"; // bump whenever worker.js changes
   const STORE_KEY = "pyc.code";
   const $ = (id) => document.getElementById(id);
   const consoleEl = $("console"), runBtn = $("runBtn"), stopBtn = $("stopBtn");
@@ -332,7 +333,7 @@ print("Squares:", squares)
     ready = false;
     runBtn.disabled = true;
     setStatus("Loading Python…", "busy");
-    worker = new Worker("worker.js");
+    worker = new Worker("worker.js?v=" + BUILD); // version param busts stale caches
     worker.onmessage = onMessage;
     worker.onerror = (e) => {
       e.preventDefault();
@@ -352,7 +353,7 @@ print("Squares:", squares)
       return;
     }
     if (type === "fatal") {
-      setStatus("Error: " + data, "error");
+      setStatus("Couldn't load Python — see the output panel", "error");
       write(data + "\n", "err");
       return;
     }
