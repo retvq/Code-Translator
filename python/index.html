@@ -1,0 +1,541 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Python Compiler</title>
+<meta name="description" content="A fast, ad-free Python compiler that runs entirely in your browser.">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🐍</text></svg>">
+<script>
+  // Register the isolation service worker so input() can work interactively.
+  if (!window.crossOriginIsolated && window.isSecureContext && "serviceWorker" in navigator) {
+    navigator.serviceWorker.register("coi-sw.js").then((reg) => {
+      const reloaded = sessionStorage.getItem("coiReloaded");
+      if (reloaded) return; // avoid reload loops if isolation isn't possible
+      const reload = () => { sessionStorage.setItem("coiReloaded", "1"); location.reload(); };
+      if (reg.active && !navigator.serviceWorker.controller) reload();
+      else if (!reg.active) navigator.serviceWorker.addEventListener("controllerchange", reload);
+    }).catch(() => {});
+  } else if (window.crossOriginIsolated) {
+    sessionStorage.removeItem("coiReloaded");
+  }
+</script>
+<link rel="stylesheet" crossorigin="anonymous" href="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/codemirror.min.css">
+<script crossorigin="anonymous" src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/codemirror.min.js"></script>
+<script crossorigin="anonymous" src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/mode/python/python.min.js"></script>
+<script crossorigin="anonymous" src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/addon/edit/closebrackets.min.js"></script>
+<script crossorigin="anonymous" src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/addon/edit/matchbrackets.min.js"></script>
+<script crossorigin="anonymous" src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/addon/comment/comment.min.js"></script>
+<script crossorigin="anonymous" src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/addon/selection/active-line.min.js"></script>
+<style>
+  :root {
+    --bg: #f6f7f9;
+    --panel: #ffffff;
+    --border: #dde1e6;
+    --text: #1f2328;
+    --muted: #656d76;
+    --accent: #2f6fde;
+    --accent-text: #ffffff;
+    --run: #1f8a4c;
+    --run-hover: #19733f;
+    --stop: #c93c37;
+    --console-bg: #fbfbfc;
+    --err: #c93c37;
+    --info: #6b7280;
+    --gutter: #f0f2f5;
+    --active-line: #f2f6ff;
+    --selection: #d4e2fb;
+    --kw: #a626a4; --def: #4078f2; --str: #50a14f; --num: #c18401;
+    --cmt: #8a919a; --builtin: #0184bc; --op: #383a42; --var2: #e45649;
+    --mono: ui-monospace, "SF Mono", "Cascadia Code", "JetBrains Mono", Menlo, Consolas, "Liberation Mono", monospace;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg: #0f1115; --panel: #161a20; --border: #2a3038; --text: #e6e8eb; --muted: #8b949e;
+      --accent: #5b8def; --console-bg: #12151a; --err: #ff7b72; --info: #8b949e;
+      --gutter: #161a20; --active-line: #1c222b; --selection: #264166;
+      --run: #2ea061; --run-hover: #36b36d; --stop: #e5534b;
+      --kw: #c678dd; --def: #61afef; --str: #98c379; --num: #d19a66;
+      --cmt: #6b7480; --builtin: #56b6c2; --op: #abb2bf; --var2: #e06c75;
+    }
+  }
+  :root[data-theme="dark"] {
+    --bg: #0f1115; --panel: #161a20; --border: #2a3038; --text: #e6e8eb; --muted: #8b949e;
+    --accent: #5b8def; --console-bg: #12151a; --err: #ff7b72; --info: #8b949e;
+    --gutter: #161a20; --active-line: #1c222b; --selection: #264166;
+    --run: #2ea061; --run-hover: #36b36d; --stop: #e5534b;
+    --kw: #c678dd; --def: #61afef; --str: #98c379; --num: #d19a66;
+    --cmt: #6b7480; --builtin: #56b6c2; --op: #abb2bf; --var2: #e06c75;
+  }
+
+  * { box-sizing: border-box; }
+  [hidden] { display: none !important; }
+  html, body { height: 100%; margin: 0; }
+  body {
+    background: var(--bg); color: var(--text);
+    font: 14px/1.45 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+    display: flex; flex-direction: column;
+  }
+
+  header {
+    display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+    padding: 10px 16px; background: var(--panel); border-bottom: 1px solid var(--border);
+  }
+  .brand { display: flex; align-items: center; gap: 8px; font-weight: 600; font-size: 15px; margin-right: auto; }
+  .brand small { font-weight: 400; color: var(--muted); font-size: 12px; }
+  .toolbar { display: flex; gap: 6px; flex-wrap: wrap; align-items: center; }
+
+  button {
+    font: inherit; font-size: 13px; cursor: pointer; border-radius: 6px;
+    padding: 6px 12px; border: 1px solid var(--border); background: var(--panel); color: var(--text);
+    display: inline-flex; align-items: center; gap: 6px; white-space: nowrap;
+  }
+  button:hover:not(:disabled) { border-color: var(--muted); }
+  button:disabled { opacity: .5; cursor: not-allowed; }
+  button:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+  button.run { background: var(--run); border-color: var(--run); color: #fff; font-weight: 600; padding: 6px 16px; }
+  button.run:hover:not(:disabled) { background: var(--run-hover); border-color: var(--run-hover); }
+  button.stop { background: var(--stop); border-color: var(--stop); color: #fff; font-weight: 600; }
+  kbd { font: 11px var(--mono); opacity: .8; }
+
+  main { flex: 1; display: flex; min-height: 0; }
+  .pane { display: flex; flex-direction: column; min-width: 0; min-height: 0; background: var(--panel); }
+  .pane-head {
+    display: flex; align-items: center; gap: 8px; height: 36px; padding: 0 12px;
+    border-bottom: 1px solid var(--border); color: var(--muted); font-size: 12px;
+    text-transform: uppercase; letter-spacing: .04em; font-weight: 600;
+  }
+  .pane-head .spacer { flex: 1; }
+  .pane-head button { padding: 2px 8px; font-size: 12px; text-transform: none; letter-spacing: 0; font-weight: 400; }
+  #editorPane { flex: 0 0 55%; }
+  #outputPane { flex: 1; }
+  .divider { flex: 0 0 5px; background: var(--border); cursor: col-resize; }
+  .divider:hover, .divider.drag { background: var(--accent); }
+
+  .editor-wrap { flex: 1; min-height: 0; position: relative; }
+  .CodeMirror {
+    position: absolute; inset: 0; height: auto; font-family: var(--mono); font-size: 14px; line-height: 1.55;
+    background: var(--panel); color: var(--text);
+  }
+  .CodeMirror-gutters { background: var(--gutter); border-right: 1px solid var(--border); }
+  .CodeMirror-linenumber { color: var(--muted); padding: 0 8px 0 4px; }
+  .CodeMirror-cursor { border-left: 2px solid var(--text); }
+  .CodeMirror-activeline-background { background: var(--active-line); }
+  .CodeMirror-selected, .CodeMirror-focused .CodeMirror-selected { background: var(--selection); }
+  .CodeMirror-line::selection, .CodeMirror-line > span::selection, .CodeMirror-line > span > span::selection { background: var(--selection); }
+  .CodeMirror-matchingbracket { color: inherit !important; background: var(--selection); outline: 1px solid var(--muted); }
+  .cm-s-default .cm-keyword { color: var(--kw); }
+  .cm-s-default .cm-def { color: var(--def); }
+  .cm-s-default .cm-string, .cm-s-default .cm-string-2 { color: var(--str); }
+  .cm-s-default .cm-number { color: var(--num); }
+  .cm-s-default .cm-comment { color: var(--cmt); font-style: italic; }
+  .cm-s-default .cm-builtin { color: var(--builtin); }
+  .cm-s-default .cm-operator { color: var(--op); }
+  .cm-s-default .cm-variable { color: var(--text); }
+  .cm-s-default .cm-variable-2 { color: var(--var2); }
+  .cm-s-default .cm-property { color: var(--def); }
+  .cm-s-default .cm-meta { color: var(--num); }
+  .cm-s-default .cm-atom { color: var(--num); }
+  .cm-s-default .cm-error { color: var(--err); background: none; }
+
+  #console {
+    flex: 1; overflow: auto; margin: 0; padding: 12px 14px; background: var(--console-bg);
+    font: 14px/1.5 var(--mono); white-space: pre-wrap; word-break: break-word; cursor: text;
+  }
+  #console .err { color: var(--err); }
+  #console .info { color: var(--info); font-style: italic; }
+  #console .in { color: var(--accent); font-weight: 600; }
+  #console img { display: block; max-width: 100%; margin: 8px 0; border-radius: 6px; background: #fff; }
+  #console .meta { display: block; color: var(--muted); margin-top: 6px; font-size: 12px; font-style: italic; }
+  .inline-input {
+    font: inherit; color: var(--accent); font-weight: 600; background: transparent;
+    border: none; border-bottom: 1px dashed var(--accent); outline: none; padding: 0; min-width: 4ch; width: 60%;
+  }
+  #stdinBox { display: none; border-top: 1px solid var(--border); }
+  #stdinBox.show { display: flex; flex-direction: column; height: 110px; }
+  #stdin { flex: 1; resize: none; border: none; outline: none; padding: 8px 12px; background: var(--panel); color: var(--text); font: 13px var(--mono); }
+
+  footer {
+    display: flex; align-items: center; gap: 12px; padding: 4px 16px; font-size: 12px; color: var(--muted);
+    border-top: 1px solid var(--border); background: var(--panel);
+  }
+  .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--muted); display: inline-block; }
+  .dot.ready { background: var(--run); }
+  .dot.busy { background: #d4a72c; animation: pulse 1s infinite; }
+  .dot.error { background: var(--stop); }
+  @keyframes pulse { 50% { opacity: .35; } }
+  #toast {
+    position: fixed; left: 50%; bottom: 40px; transform: translateX(-50%) translateY(20px); opacity: 0;
+    background: var(--text); color: var(--panel); padding: 8px 14px; border-radius: 6px; font-size: 13px;
+    transition: .2s; pointer-events: none; z-index: 10;
+  }
+  #toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }
+  .hide-sm { display: inline; }
+
+  @media (max-width: 760px) {
+    header { padding: 8px 12px; }
+    .hide-sm { display: none; }
+    main { flex-direction: column; }
+    #editorPane { flex: 0 0 50%; }
+    .divider { display: none; }
+    #outputPane { border-top: 1px solid var(--border); }
+    footer { padding: 4px 12px; }
+  }
+</style>
+</head>
+<body>
+<header>
+  <div class="brand">🐍 Python Compiler <small id="pyver" class="hide-sm"></small></div>
+  <div class="toolbar">
+    <button id="runBtn" class="run" disabled title="Run (Ctrl+Enter)">▶ Run <kbd class="hide-sm">Ctrl+↵</kbd></button>
+    <button id="stopBtn" class="stop" hidden title="Stop">■ Stop</button>
+    <button id="openBtn" title="Open a .py file">Open</button>
+    <button id="saveBtn" title="Download as .py (Ctrl+S)">Download</button>
+    <button id="shareBtn" title="Copy a link containing this code">Share</button>
+    <button id="themeBtn" title="Toggle light/dark theme">Theme</button>
+    <input type="file" id="fileInput" accept=".py,.txt,text/x-python,text/plain" hidden>
+  </div>
+</header>
+
+<main>
+  <section class="pane" id="editorPane">
+    <div class="pane-head">
+      <span>main.py</span><span class="spacer"></span>
+      <button id="resetBtn" title="Replace with the example program">Example</button>
+    </div>
+    <div class="editor-wrap"><textarea id="code"></textarea></div>
+  </section>
+  <div class="divider" id="divider" role="separator" aria-orientation="vertical"></div>
+  <section class="pane" id="outputPane">
+    <div class="pane-head">
+      <span>Output</span><span class="spacer"></span>
+      <button id="clearBtn">Clear</button>
+    </div>
+    <pre id="console" aria-live="polite"></pre>
+    <div id="stdinBox">
+      <div class="pane-head"><span>Input (stdin) — one line per input() call</span></div>
+      <textarea id="stdin" spellcheck="false" placeholder="Type program input here before running…"></textarea>
+    </div>
+  </section>
+</main>
+
+<footer>
+  <span class="dot" id="dot"></span><span id="status">Loading Python…</span>
+  <span class="spacer" style="flex:1"></span>
+  <span class="hide-sm">Runs locally in your browser · No ads · No sign-up</span>
+</footer>
+<div id="toast"></div>
+
+<script>
+(() => {
+  const EXAMPLE = `# Welcome! Write Python here and press Run (Ctrl+Enter).
+
+def greet(name):
+    return f"Hello, {name}!"
+
+name = input("What's your name? ")
+print(greet(name))
+
+squares = [n * n for n in range(1, 6)]
+print("Squares:", squares)
+`;
+  const STORE_KEY = "pyc.code";
+  const $ = (id) => document.getElementById(id);
+  const consoleEl = $("console"), runBtn = $("runBtn"), stopBtn = $("stopBtn");
+  const statusEl = $("status"), dot = $("dot");
+
+  // ---------- storage helpers (never throw) ----------
+  const store = {
+    get(k) { try { return localStorage.getItem(k); } catch { return null; } },
+    set(k, v) { try { localStorage.setItem(k, v); } catch {} },
+  };
+
+  // ---------- theme ----------
+  const savedTheme = store.get("pyc.theme");
+  if (savedTheme) document.documentElement.dataset.theme = savedTheme;
+  $("themeBtn").onclick = () => {
+    const cur = document.documentElement.dataset.theme ||
+      (matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light");
+    const next = cur === "dark" ? "light" : "dark";
+    document.documentElement.dataset.theme = next;
+    store.set("pyc.theme", next);
+  };
+
+  // ---------- editor ----------
+  const editor = CodeMirror.fromTextArea($("code"), {
+    mode: { name: "python", version: 3, singleLineStringErrors: false },
+    lineNumbers: true, indentUnit: 4, tabSize: 4, indentWithTabs: false,
+    autoCloseBrackets: true, matchBrackets: true, styleActiveLine: true,
+    viewportMargin: 20,
+    extraKeys: {
+      Tab: (cm) => cm.somethingSelected() ? cm.indentSelection("add") : cm.replaceSelection("    ", "end"),
+      "Shift-Tab": (cm) => cm.indentSelection("subtract"),
+      "Ctrl-Enter": () => run(), "Cmd-Enter": () => run(),
+      "Ctrl-S": () => download(), "Cmd-S": () => download(),
+      "Ctrl-/": "toggleComment", "Cmd-/": "toggleComment",
+    },
+  });
+  let saveTimer;
+  editor.on("change", () => {
+    clearTimeout(saveTimer);
+    saveTimer = setTimeout(() => store.set(STORE_KEY, editor.getValue()), 300);
+  });
+
+  // ---------- output ----------
+  let atBottom = true;
+  consoleEl.addEventListener("scroll", () => {
+    atBottom = consoleEl.scrollHeight - consoleEl.scrollTop - consoleEl.clientHeight < 30;
+  });
+  function scroll() { if (atBottom) consoleEl.scrollTop = consoleEl.scrollHeight; }
+  function write(text, cls) {
+    if (!text) return;
+    const last = consoleEl.lastChild;
+    if (last && last.nodeType === 1 && last.tagName === "SPAN" && (last.className || "") === (cls || "") && !last.dataset.fixed) {
+      last.textContent += text;
+    } else {
+      const span = document.createElement("span");
+      if (cls) span.className = cls;
+      span.textContent = text;
+      consoleEl.appendChild(span);
+    }
+    scroll();
+  }
+  function writeMeta(text) {
+    const span = document.createElement("span");
+    span.className = "meta"; span.dataset.fixed = "1"; span.textContent = text;
+    consoleEl.appendChild(span); scroll();
+  }
+  function clearConsole() { consoleEl.textContent = ""; }
+  $("clearBtn").onclick = clearConsole;
+  consoleEl.addEventListener("click", () => {
+    const inp = consoleEl.querySelector(".inline-input");
+    if (inp && !getSelection().toString()) inp.focus();
+  });
+
+  function setStatus(text, state) {
+    statusEl.textContent = text;
+    dot.className = "dot " + (state || "");
+  }
+
+  // ---------- worker ----------
+  const interactive = window.crossOriginIsolated && typeof SharedArrayBuffer !== "undefined";
+  const sab = interactive ? new SharedArrayBuffer(8 + 65536) : null;
+  const ctrl = sab ? new Int32Array(sab, 0, 2) : null;
+  const inputBytes = sab ? new Uint8Array(sab, 8) : null;
+  const interruptBuf = interactive ? new Uint8Array(new SharedArrayBuffer(1)) : null;
+
+  if (!interactive) $("stdinBox").classList.add("show");
+
+  let worker = null, ready = false, running = false, stopped = false, startTime = 0, killTimer = null;
+
+  function startWorker() {
+    ready = false;
+    runBtn.disabled = true;
+    setStatus("Loading Python…", "busy");
+    worker = new Worker("worker.js");
+    worker.onmessage = onMessage;
+    worker.onerror = (e) => {
+      setStatus("Failed to load Python — check your connection and reload.", "error");
+      write((e.message || "Worker error") + "\n", "err");
+    };
+    worker.postMessage({ type: "init", sab, interrupt: interruptBuf ? interruptBuf.buffer : null });
+  }
+
+  function onMessage(e) {
+    const { type, data } = e.data;
+    if (type === "ready") {
+      ready = true;
+      runBtn.disabled = false;
+      $("pyver").textContent = "Python " + data.version;
+      setStatus("Ready", "ready");
+      return;
+    }
+    if (type === "fatal") {
+      setStatus("Error: " + data, "error");
+      write(data + "\n", "err");
+      return;
+    }
+    if (stopped) return; // drop output from a run the user stopped
+    switch (type) {
+      case "stdout": write(data); break;
+      case "stderr": write(data, "err"); break;
+      case "info": write(data + "\n", "info"); break;
+      case "image": {
+        const img = new Image();
+        img.alt = "Plot output";
+        img.src = "data:image/png;base64," + data;
+        img.onload = scroll;
+        consoleEl.appendChild(img);
+        break;
+      }
+      case "input": askInput(); break;
+      case "done": finish(data.ok); break;
+    }
+  }
+
+  function askInput() {
+    setStatus("Waiting for input…", "busy");
+    const inp = document.createElement("input");
+    inp.className = "inline-input";
+    inp.setAttribute("aria-label", "Program input");
+    inp.autocomplete = "off"; inp.spellcheck = false;
+    consoleEl.appendChild(inp);
+    scroll();
+    inp.focus({ preventScroll: true });
+    inp.addEventListener("keydown", (ev) => {
+      if (ev.key !== "Enter") return;
+      ev.preventDefault();
+      const value = inp.value;
+      const echo = document.createElement("span");
+      echo.className = "in"; echo.dataset.fixed = "1"; echo.textContent = value + "\n";
+      inp.replaceWith(echo);
+      const bytes = new TextEncoder().encode(value).slice(0, inputBytes.length);
+      inputBytes.set(bytes);
+      Atomics.store(ctrl, 1, bytes.length);
+      Atomics.store(ctrl, 0, 1);
+      Atomics.notify(ctrl, 0);
+      setStatus("Running…", "busy");
+    });
+  }
+
+  function run() {
+    if (!ready || running) return;
+    clearConsole();
+    running = true; stopped = false;
+    runBtn.hidden = true; stopBtn.hidden = false;
+    setStatus("Running…", "busy");
+    if (interruptBuf) interruptBuf[0] = 0;
+    startTime = performance.now();
+    worker.postMessage({ type: "run", code: editor.getValue(), stdin: $("stdin").value });
+  }
+
+  function finish(ok) {
+    clearTimeout(killTimer);
+    running = false;
+    runBtn.hidden = false; stopBtn.hidden = true;
+    const secs = ((performance.now() - startTime) / 1000).toFixed(2);
+    writeMeta(ok ? `=== Code executed successfully in ${secs}s ===` : `=== Code exited with an error (${secs}s) ===`);
+    setStatus(ok ? `Finished in ${secs}s` : "Finished with errors", ok ? "ready" : "error");
+  }
+
+  function stop() {
+    if (!running) return;
+    stopped = true;
+    const pending = consoleEl.querySelector(".inline-input");
+    if (pending) pending.remove();
+    if (interruptBuf) interruptBuf[0] = 2; // raises KeyboardInterrupt inside Python
+    if (ctrl) { Atomics.store(ctrl, 0, 2); Atomics.notify(ctrl, 0); }
+    writeMeta("=== Execution stopped ===");
+    running = false;
+    runBtn.hidden = false; stopBtn.hidden = true;
+    runBtn.disabled = true; // re-enabled once the stopped run has wound down
+    setStatus("Stopping…", "busy");
+    // If Python doesn't respond quickly (e.g. stuck in C code), restart it.
+    const w = worker;
+    killTimer = setTimeout(() => {
+      if (w === worker) { w.terminate(); startWorker(); }
+    }, 1500);
+    worker.onmessage = (e) => {
+      if (e.data.type !== "done") return;
+      clearTimeout(killTimer);
+      worker.onmessage = onMessage;
+      runBtn.disabled = false;
+      setStatus("Stopped", "");
+    };
+  }
+
+  runBtn.onclick = run;
+  stopBtn.onclick = stop;
+  document.addEventListener("keydown", (e) => {
+    if ((e.ctrlKey || e.metaKey) && e.key === "Enter") { e.preventDefault(); run(); }
+    if (e.key === "Escape" && running) stop();
+  });
+
+  // ---------- files ----------
+  function download() {
+    const blob = new Blob([editor.getValue()], { type: "text/x-python" });
+    const a = document.createElement("a");
+    a.href = URL.createObjectURL(blob);
+    a.download = "main.py";
+    a.click();
+    setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+  }
+  $("saveBtn").onclick = download;
+  $("openBtn").onclick = () => $("fileInput").click();
+  $("fileInput").onchange = async (e) => {
+    const f = e.target.files[0];
+    if (!f) return;
+    editor.setValue(await f.text());
+    e.target.value = "";
+    toast("Opened " + f.name);
+  };
+  $("resetBtn").onclick = () => {
+    if (editor.getValue().trim() && editor.getValue() !== EXAMPLE && !confirm("Replace your code with the example?")) return;
+    editor.setValue(EXAMPLE);
+  };
+
+  // ---------- share links (code compressed into the URL hash) ----------
+  const b64url = {
+    enc: (bytes) => btoa(String.fromCharCode(...bytes)).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, ""),
+    dec: (s) => Uint8Array.from(atob(s.replace(/-/g, "+").replace(/_/g, "/")), (c) => c.charCodeAt(0)),
+  };
+  async function pipe(bytes, stream) {
+    return new Uint8Array(await new Response(new Blob([bytes]).stream().pipeThrough(stream)).arrayBuffer());
+  }
+  async function encodeCode(code) {
+    const raw = new TextEncoder().encode(code);
+    if (typeof CompressionStream !== "undefined") return "z" + b64url.enc(await pipe(raw, new CompressionStream("deflate-raw")));
+    return "p" + b64url.enc(raw);
+  }
+  async function decodeCode(s) {
+    const bytes = b64url.dec(s.slice(1));
+    return new TextDecoder().decode(s[0] === "z" ? await pipe(bytes, new DecompressionStream("deflate-raw")) : bytes);
+  }
+  $("shareBtn").onclick = async () => {
+    const url = location.origin + location.pathname + "#code=" + await encodeCode(editor.getValue());
+    history.replaceState(null, "", url);
+    try { await navigator.clipboard.writeText(url); toast("Link copied to clipboard"); }
+    catch { prompt("Copy this link:", url); }
+  };
+
+  let toastTimer;
+  function toast(msg) {
+    const t = $("toast");
+    t.textContent = msg; t.classList.add("show");
+    clearTimeout(toastTimer);
+    toastTimer = setTimeout(() => t.classList.remove("show"), 1800);
+  }
+
+  // ---------- resizable split ----------
+  const divider = $("divider"), editorPane = $("editorPane");
+  divider.addEventListener("pointerdown", (e) => {
+    divider.setPointerCapture(e.pointerId);
+    divider.classList.add("drag");
+    const move = (ev) => {
+      const pct = Math.min(85, Math.max(15, (ev.clientX / window.innerWidth) * 100));
+      editorPane.style.flexBasis = pct + "%";
+      editor.refresh();
+    };
+    const up = () => {
+      divider.classList.remove("drag");
+      divider.removeEventListener("pointermove", move);
+      divider.removeEventListener("pointerup", up);
+    };
+    divider.addEventListener("pointermove", move);
+    divider.addEventListener("pointerup", up);
+  });
+
+  // ---------- startup ----------
+  (async () => {
+    const m = location.hash.match(/^#code=(.+)$/);
+    let code = null;
+    if (m) { try { code = await decodeCode(m[1]); } catch {} }
+    editor.setValue(code ?? store.get(STORE_KEY) ?? EXAMPLE);
+    editor.focus();
+    editor.setCursor(editor.lineCount(), 0);
+  })();
+  startWorker();
+})();
+</script>
+</body>
+</html>
