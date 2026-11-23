@@ -4,11 +4,16 @@
 const CDN_URL = "https://cdn.jsdelivr.net/pyodide/v0.27.2/full/";
 const LOCAL_URL = new URL("pyodide/", self.location.href).href;
 let PYODIDE_URL = LOCAL_URL;
+let loadError = null;
 try {
   importScripts(LOCAL_URL + "pyodide.js");
-} catch (e) {
+} catch (e1) {
   PYODIDE_URL = CDN_URL;
-  importScripts(CDN_URL + "pyodide.js");
+  try {
+    importScripts(CDN_URL + "pyodide.js");
+  } catch (e2) {
+    loadError = `Could not download Python.\n- From this site: ${e1.message}\n- From the CDN: ${e2.message}`;
+  }
 }
 
 let pyodide = null;
@@ -93,6 +98,7 @@ function makeWriter(type) {
 }
 
 async function init(msg) {
+  if (loadError) throw new Error(loadError);
   if (msg.sab) {
     ctrl = new Int32Array(msg.sab, 0, 2);
     inputBytes = new Uint8Array(msg.sab, 8);
