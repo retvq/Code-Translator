@@ -1,6 +1,15 @@
 /* Runs Python (Pyodide) off the main thread so the page never freezes. */
-const PYODIDE_URL = "https://cdn.jsdelivr.net/pyodide/v0.27.2/full/";
-importScripts(PYODIDE_URL + "pyodide.js");
+/* Python core is self-hosted (works even where the CDN is blocked); the CDN is a
+ * fallback for the core and the source for optional packages like numpy. */
+const CDN_URL = "https://cdn.jsdelivr.net/pyodide/v0.27.2/full/";
+const LOCAL_URL = new URL("pyodide/", self.location.href).href;
+let PYODIDE_URL = LOCAL_URL;
+try {
+  importScripts(LOCAL_URL + "pyodide.js");
+} catch (e) {
+  PYODIDE_URL = CDN_URL;
+  importScripts(CDN_URL + "pyodide.js");
+}
 
 let pyodide = null;
 let ctrl = null; // Int32Array [state, length] in shared memory (interactive input)
@@ -88,7 +97,15 @@ async function init(msg) {
     ctrl = new Int32Array(msg.sab, 0, 2);
     inputBytes = new Uint8Array(msg.sab, 8);
   }
-  pyodide = await loadPyodide({ indexURL: PYODIDE_URL });
+  try {
+    pyodide = await loadPyodide({ indexURL: PYODIDE_URL });
+  } catch (e) {
+    if (PYODIDE_URL === CDN_URL) throw e;
+    PYODIDE_URL = CDN_URL; // local files missing/broken: try the CDN
+    pyodide = await loadPyodide({ indexURL: CDN_URL });
+  }
+  // Packages (numpy, pandas, ...) aren't self-hosted: fetch them from the CDN.
+  if (pyodide._api && pyodide._api.config) pyodide._api.config.indexURL = CDN_URL;
   if (msg.interrupt) pyodide.setInterruptBuffer(new Uint8Array(msg.interrupt));
   pyodide.setStdout(makeWriter("stdout"));
   pyodide.setStderr(makeWriter("stderr"));
@@ -102,14 +119,15 @@ async function init(msg) {
 async function run(msg) {
   stdinLines = (msg.stdin || "").split("\n");
   if (stdinLines.length && stdinLines[stdinLines.length - 1] === "") stdinLines.pop();
-  let ok = false;
+  let ok = false, pkgError = false;
   try {
     await pyodide.loadPackagesFromImports(msg.code, {
       messageCallback: (m) => {
         if (/^Loading /.test(m)) post("info", m);
       },
-      errorCallback: (m) => post("info", m),
+      errorCallback: (m) => { pkgError = true; post("stderr", m + "\n"); },
     });
+    if (pkgError) post("stderr", "(Extra packages download from cdn.jsdelivr.net, which may be blocked on this network.)\n\n");
     const fn = pyodide.globals.get("_run_user_code");
     ok = fn(msg.code);
     fn.destroy();
