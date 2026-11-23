@@ -335,8 +335,9 @@ print("Squares:", squares)
     worker = new Worker("worker.js");
     worker.onmessage = onMessage;
     worker.onerror = (e) => {
+      e.preventDefault();
       setStatus("Failed to load Python — check your connection and reload.", "error");
-      write((e.message || "Worker error") + "\n", "err");
+      write("Couldn't load Python: " + (e.message || "network error") + "\nTry reloading the page (Ctrl+Shift+R).\n", "err");
     };
     worker.postMessage({ type: "init", sab, interrupt: interruptBuf ? interruptBuf.buffer : null });
   }
